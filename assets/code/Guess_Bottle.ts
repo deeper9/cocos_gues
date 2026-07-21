@@ -7,6 +7,7 @@ import { BottleData, ContainerData } from './bottle_types';
 import { RandomPicker } from './bottle_utils';
 import { BottleDragController } from './BottleDragController';
 import { BottleTimerController } from './BottleTimerController';
+import { BottleShuffleAnimator } from './BottleShuffleAnimator';
 import { BOTTLE_LEVELS, BOTTLE_LEVEL_TIMERS, DEFAULT_BOTTLE_COUNT } from './game_config';
 
 const { ccclass, property } = _decorator;
@@ -57,6 +58,10 @@ export class Guess_Bottle extends Component {
     // --- 子控制器 ---
     private _dragCtrl: BottleDragController = null;
     private _timerCtrl = new BottleTimerController();
+    private _shuffleAnim: BottleShuffleAnimator = null;
+
+    // --- 锁定（洗牌期间禁止拖拽） ---
+    private _locked = false;
 
     // --- 预览 ---
     private _previewTarget: Node = null;
@@ -64,7 +69,7 @@ export class Guess_Bottle extends Component {
     // ==================== 生命周期 ====================
 
     protected onLoad(): void {
-        const canvas = director.getScene()?.getChildByName('Canvas') ?? this.node;
+        this._canvas = director.getScene()?.getChildByName('Canvas') ?? this.node;
 
         // 默认模式
         if (gameState.mode === GameMode.None) {
@@ -77,15 +82,36 @@ export class Guess_Bottle extends Component {
         this._unplacedCount = this._bottles.length;
         this._refreshInitBtn();
 
-        // 2. 拖拽控制器
+        // 2. 拖拽控制器（先创建，洗牌结束后注册事件）
         this._dragCtrl = new BottleDragController(
-            this._bottles, this._containers, canvas,
+            this._bottles, this._containers, this._canvas,
             { onBottlePlaced: () => { this._unplacedCount--; this._refreshInitBtn(); } },
         );
+
+        // 3. 洗牌动画 → 完成后启用拖拽 + 计时
+        this._locked = true;
+        this._dragCtrl.locked = true;
+        this._shuffleAnim = new BottleShuffleAnimator(
+            this._bottles,
+            { onShuffleDone: () => this._onShuffleDone() },
+            { onSpread: () => { /* 每轮散开时不做额外操作 */ } },
+        );
+        this._shuffleAnim.start();
+
+        // 4. UI
+        this._initModeUI();
+        this.Setting_Page_Mask?.on(Input.EventType.TOUCH_START, this._onMaskClick, this);
+    }
+
+    private _canvas: Node = null;
+
+    private _onShuffleDone(): void {
+        this._locked = false;
+        this._dragCtrl.locked = false;
         this._dragCtrl.registerBottleEvents();
         this._dragCtrl.registerContainerEvents(c => this._onPreview(c));
 
-        // 3. 计时器
+        // 计时器
         this._timerCtrl.bindLabel(this.Timer_Label);
         this._timerCtrl.onTimeout(() => this._showResurrect());
         const configLevel = gameState.level - 4;
@@ -94,10 +120,6 @@ export class Guess_Bottle extends Component {
             : 0;
         this._timerCtrl.init(startSecs);
         this.schedule(() => this._timerCtrl.tick(), 1);
-
-        // 4. UI
-        this._initModeUI();
-        this.Setting_Page_Mask?.on(Input.EventType.TOUCH_START, this._onMaskClick, this);
     }
 
     protected onDestroy(): void {
@@ -112,8 +134,11 @@ export class Guess_Bottle extends Component {
         const count = level === -1
             ? this.Bottle_Nodes.length
             : (BOTTLE_LEVELS[level - 4] ?? DEFAULT_BOTTLE_COUNT);
-        const bgW = this.Bg_Node.getComponent(UITransform).contentSize.width;
-        const margin = (bgW - (count * size.width + (count - 1) * BOTTLE_SPACING)) / 2;
+
+        // 以 Bg_Node 的世界坐标为居中基准
+        const bgWorldPos = this.Bg_Node.getWorldPosition();
+        const totalW = count * size.width + (count - 1) * BOTTLE_SPACING;
+        const startX = bgWorldPos.x - totalW / 2 + size.width / 2;
 
         for (let i = 0; i < this.Bottle_Nodes.length; i++) {
             const node = this.Bottle_Nodes[i];
@@ -126,9 +151,9 @@ export class Guess_Bottle extends Component {
 
             this._bottles.push({
                 isDrag: false, node, opacityNode: opacity, container: null,
-                worldPosition: new Vec3(i * (size.width + BOTTLE_SPACING) + margin, 650, 0),
+                worldPosition: new Vec3(startX + i * (size.width + BOTTLE_SPACING), 650, 0),
             });
-            node.setPosition(this._bottles[i].worldPosition);
+            node.setWorldPosition(this._bottles[i].worldPosition);
             opacity.setPosition(OFF_SCREEN);
             node.active = true;
         }

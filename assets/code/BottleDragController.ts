@@ -34,6 +34,8 @@ export class BottleDragController {
     private _dragOffset = new Vec2(0, 0);
     /** 上次 _onDragMove 检测到的悬停容器（松开时直接复用，更可靠） */
     private _lastHovered: ContainerData | null = null;
+    /** 外部锁定（洗牌期间禁止拖拽） */
+    locked = false;
 
     constructor(
         bottles: BottleData[],
@@ -77,6 +79,8 @@ export class BottleDragController {
     // ==================== 拖拽事件 ====================
 
     private _onDragStart(event: EventTouch): void {
+        if (this.locked) return;
+
         for (const bottle of this._bottles) {
             if (bottle.node === event.currentTarget) {
                 this._dragBottle = bottle;
