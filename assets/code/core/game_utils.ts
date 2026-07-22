@@ -1,28 +1,11 @@
+/**
+ * game_utils.ts —— 通用游戏工具函数
+ *
+ * 不依赖任何游戏逻辑，整个工程的任何模块都可直接引用。
+ */
 import { Node, UITransform, Vec3, Rect } from 'cc';
 
-// ========== 随机选取工具 ==========
-
-export class RandomPicker {
-    /** 从列表中随机取出一个元素并从原列表中移除 */
-    static pickOne<T>(list: T[]): T | null {
-        if (list.length === 0) return null;
-        const randomIndex = Math.floor(Math.random() * list.length);
-        return list.splice(randomIndex, 1)[0];
-    }
-
-    /** 随机获取列表中所有元素，返回随机顺序的新列表（不修改原列表） */
-    static pickAll<T>(list: T[]): T[] {
-        const copyList = [...list];
-        const result: T[] = [];
-        while (copyList.length > 0) {
-            const item = this.pickOne(copyList);
-            if (item) result.push(item);
-        }
-        return result;
-    }
-}
-
-// ========== 碰撞检测工具 ==========
+// ========== 碰撞检测 ==========
 
 /** 计算节点在世界坐标系中的矩形区域（左下角为原点） */
 export function getWorldRect(node: Node): Rect {
@@ -41,7 +24,7 @@ export function getWorldRect(node: Node): Rect {
         worldPos.x + offsetX,
         worldPos.y + offsetY,
         uiTrans.width,
-        uiTrans.height
+        uiTrans.height,
     );
 }
 
@@ -66,12 +49,4 @@ export function isOverlapGreaterThan(node1: Node, node2: Node, threshold: number
 
     if (!intersection) return false;
     return intersection.width * intersection.height > threshold;
-}
-
-/** 时间格式化：秒 → mm:ss */
-export function formatTime(seconds: number): string {
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${pad(mins)}:${pad(secs)}`;
 }

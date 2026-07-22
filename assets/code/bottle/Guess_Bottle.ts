@@ -2,13 +2,13 @@ import {
     _decorator, Component, Node, instantiate,
     UITransform, Vec3, director, Input, Label, EventTouch, UIOpacity, RichText,
 } from 'cc';
-import { GameMode, gameState } from './global_data';
+import { GameMode, gameState } from '../core/global_data';
 import { BottleData, ContainerData } from './bottle_types';
 import { RandomPicker } from './bottle_utils';
 import { BottleDragController } from './BottleDragController';
 import { BottleTimerController } from './BottleTimerController';
 import { BottleShuffleAnimator } from './BottleShuffleAnimator';
-import { BOTTLE_LEVELS, BOTTLE_LEVEL_TIMERS, DEFAULT_BOTTLE_COUNT } from './game_config';
+import { BOTTLE_LEVELS, BOTTLE_LEVEL_TIMERS, DEFAULT_BOTTLE_COUNT } from './bottle_config';
 
 const { ccclass, property } = _decorator;
 
@@ -22,7 +22,7 @@ const OFF_SCREEN = new Vec3(-1000, -1000, 0);
  * Guess_Bottle —— 游戏主组件（纯编排层）
  *
  * 职责：持有数据、连接编辑器属性、委托子控制器执行逻辑。
- * 不包含算法细节——拖拽 → DragController，计时 → TimerController，动画 → EntranceAnimator
+ * 不包含算法细节——拖拽 → DragController，计时 → TimerController
  */
 @ccclass('Guess_Bottle')
 export class Guess_Bottle extends Component {
@@ -47,6 +47,7 @@ export class Guess_Bottle extends Component {
     @property(RichText)   Level_Title: RichText = null;
     @property(Node)       Step_Node: Node = null;
     @property              Level_Timer: number = 0;
+    @property(Node)       HomeCanvas: Node = null;       // 模式选择入口面板
 
     // ==================== 私有状态 ====================
 
@@ -70,8 +71,19 @@ export class Guess_Bottle extends Component {
 
     protected onLoad(): void {
         this._canvas = director.getScene()?.getChildByName('Canvas') ?? this.node;
+        this.Setting_Page_Mask?.on(Input.EventType.TOUCH_START, this._onMaskClick, this);
+        // 不在此处构建游戏——等待 Bottle_Entry 调用 startGame()
+    }
 
-        // 默认模式
+    /**
+     * 由 Bottle_Entry 在用户选择模式后调用，启动游戏主流程。
+     * 每次调用都会先清理上一局残留，再从头构建。
+     */
+    public startGame(): void {
+        // 0. 清理上一局残留（确保重复调用安全）
+        this._cleanup();
+
+        // 保险：如果外部未设置模式，默认经典模式
         if (gameState.mode === GameMode.None) {
             gameState.enterBottleGame(GameMode.Classic);
         }
@@ -82,7 +94,7 @@ export class Guess_Bottle extends Component {
         this._unplacedCount = this._bottles.length;
         this._refreshInitBtn();
 
-        // 2. 拖拽控制器（先创建，洗牌结束后注册事件）
+        // 2. 拖拽控制器
         this._dragCtrl = new BottleDragController(
             this._bottles, this._containers, this._canvas,
             { onBottlePlaced: () => { this._unplacedCount--; this._refreshInitBtn(); } },
@@ -94,13 +106,12 @@ export class Guess_Bottle extends Component {
         this._shuffleAnim = new BottleShuffleAnimator(
             this._bottles,
             { onShuffleDone: () => this._onShuffleDone() },
-            { onSpread: () => { /* 每轮散开时不做额外操作 */ } },
+            { onSpread: () => {} },
         );
         this._shuffleAnim.start();
 
         // 4. UI
         this._initModeUI();
-        this.Setting_Page_Mask?.on(Input.EventType.TOUCH_START, this._onMaskClick, this);
     }
 
     private _canvas: Node = null;
@@ -124,6 +135,37 @@ export class Guess_Bottle extends Component {
 
     protected onDestroy(): void {
         this._dragCtrl?.destroy();
+        this._dragCtrl = null;
+        this.unscheduleAllCallbacks();
+        // 场景销毁时子节点先于父节点销毁，需检查 isValid
+        if (this.Setting_Page_Mask?.isValid) {
+            this.Setting_Page_Mask.off(Input.EventType.TOUCH_START, this._onMaskClick, this);
+        }
+    }
+
+    // ==================== 清理 ====================
+
+    /** 销毁上一局所有运行时对象，重置状态。可安全重复调用。 */
+    private _cleanup(): void {
+        this._dragCtrl?.destroy();
+        this._dragCtrl = null;
+        this.unscheduleAllCallbacks();
+        this._timerCtrl.reset(0);
+
+        for (const b of this._bottles) {
+            b.opacityNode?.destroy();
+        }
+        for (const c of this._containers) {
+            c.ctr?.destroy();
+            c.cctr?.destroy();
+        }
+
+        this._bottles = [];
+        this._containers = [];
+        this._unplacedCount = 0;
+        this._checkCount = 0;
+        this._previewTarget = null;
+        this._locked = false;
     }
 
     // ==================== 数据构建 ====================
@@ -250,6 +292,11 @@ export class Guess_Bottle extends Component {
         this._closePreview();
     }
 
+    /** 关闭预览面板（取消预览），供按钮 ClickEvent 绑定 */
+    closePreview(): void {
+        this._closePreview();
+    }
+
     private _closePreview(): void {
         this._timerCtrl.resume();
         this._previewTarget = null;
@@ -304,8 +351,13 @@ export class Guess_Bottle extends Component {
     // ==================== 场景导航 ====================
 
     restart(): void {
+        // 关闭所有面板，然后让 startGame() 全量清理+重建
+        this._closePreview();
         this.closeSettingButton();
-        director.loadScene('Bottle');
+        this._setVisible(this.Next_Level_Panel, false);
+        this._setVisible(this.Resurect_Tips, false);
+        if (this.Steps_Label) this.Steps_Label.string = '0';
+        this.startGame();
     }
 
     nextLevel(): void {
@@ -317,9 +369,19 @@ export class Guess_Bottle extends Component {
         director.loadScene('homepage');
     }
 
+    /** 返回入口面板：清理游戏状态 → 隐藏游戏区域 → 显示 homeCanvas */
+    goHomeCanvas(): void {
+        this._closePreview();
+        this.closeSettingButton();
+        this._cleanup();
+        if (this.node) this.node.active = false;
+        if (this.HomeCanvas) this.HomeCanvas.active = true;
+    }
+
     // 编辑器按钮兼容别名
-    regame(): void { this.restart(); }
-    backHomePage(): void { this.backToHome(); }
-    nextOne(): void { this.nextLevel(); }
-    returnBack(): void { this.backToHome(); }
+    regame = () => this.restart();
+    backHomePage = () => this.backToHome();
+    nextOne = () => this.nextLevel();
+    returnBack = () => this.closeSettingButton();
+    goHome = () => this.goHomeCanvas();
 }

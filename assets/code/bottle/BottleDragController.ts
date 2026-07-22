@@ -2,7 +2,7 @@ import {
     Node, UITransform, Vec2, Vec3, EventTouch, tween,
 } from 'cc';
 import { BottleData, ContainerData } from './bottle_types';
-import { isOverlapGreaterThan } from './bottle_utils';
+import { isOverlapGreaterThan } from '../core/game_utils';
 
 // ========== 常量 ==========
 const SCALE_NORMAL = new Vec3(1, 1, 1);
@@ -69,10 +69,12 @@ export class BottleDragController {
     destroy(): void {
         this._unbindGlobalEvents();
         for (const bottle of this._bottles) {
-            bottle.node.off(Node.EventType.TOUCH_START, this._onDragStart, this);
+            if (bottle?.node?.isValid)
+                bottle.node.off(Node.EventType.TOUCH_START, this._onDragStart, this);
         }
         for (const container of this._containers) {
-            container.ctr.off(Node.EventType.TOUCH_END);
+            if (container?.ctr?.isValid)
+                container.ctr.off(Node.EventType.TOUCH_END);
         }
     }
 
@@ -175,6 +177,7 @@ export class BottleDragController {
     }
 
     private _unbindGlobalEvents(): void {
+        if (!this._globalEventTarget?.isValid) return;
         this._globalEventTarget.off(Node.EventType.TOUCH_MOVE, this._onDragMove, this);
         this._globalEventTarget.off(Node.EventType.TOUCH_END, this._onDragEnd, this);
         this._globalEventTarget.off(Node.EventType.TOUCH_CANCEL, this._onDragEnd, this);
@@ -363,6 +366,8 @@ export class BottleDragController {
 
         this._callbacks.onBottlePlaced();
     }
+
+    // ==================== 碰撞检测 ====================
 
     private _getThreshold(): number {
         if (!this._dragBottle) return 0;
