@@ -3,6 +3,7 @@ import {
     UITransform, Vec3, director, Input, Label, EventTouch, UIOpacity, RichText,
 } from 'cc';
 import { GameMode, gameState } from '../core/global_data';
+import { formatTime } from '../core/Timer';
 import { BottleData, ContainerData } from './bottle_types';
 import { RandomPicker } from './bottle_utils';
 import { BottleDragController } from './BottleDragController';
@@ -44,6 +45,9 @@ export class Guess_Bottle extends Component {
     @property(RichText)   Mode_Title: RichText = null;
     @property(Node)       Preview_Panel: Node = null;
     @property(Node)       Next_Level_Panel: Node = null;
+    @property(Node)       Complete_Panel: Node = null;     // 经典模式通关面板
+    @property(Label)      Complete_Time_Label: Label = null;  // 通关面板 - 用时
+    @property(Label)      Complete_Step_Label: Label = null;  // 通关面板 - 步数
     @property(RichText)   Level_Title: RichText = null;
     @property(Node)       Step_Node: Node = null;
     @property              Level_Timer: number = 0;
@@ -131,6 +135,41 @@ export class Guess_Bottle extends Component {
             : 0;
         this._timerCtrl.init(startSecs);
         this.schedule(() => this._timerCtrl.tick(), 1);
+
+        // 洗牌后自动验证一次，提示当前正确个数（不计步数）
+        this._autoCheckOnce();
+    }
+
+    /** 洗牌后自动验证一次，显示 Tips 后 3 秒自动隐藏 */
+    private _autoCheckOnce(): void {
+        // 按 X 坐标将每个瓶子归入下方对应的容器（默认摆放）
+        for (const bottle of this._bottles) {
+            const bx = bottle.node.getWorldPosition().x;
+            let best: ContainerData | null = null;
+            let bestDist = Infinity;
+            for (const c of this._containers) {
+                const dist = Math.abs(c.cctr.getWorldPosition().x - bx);
+                if (dist < bestDist) { bestDist = dist; best = c; }
+            }
+            if (best) {
+                const pos = best.cctr.getWorldPosition();
+                bottle.node.setWorldPosition(pos);
+                bottle.worldPosition = pos;
+                bottle.container = best;
+                best.curBottle = bottle;
+                bottle.opacityNode.setWorldPosition(OFF_SCREEN);
+            }
+        }
+        // 拖拽控制器引用同一份数据数组，自动同步，无需额外通知
+
+        // 统计正确个数
+        let correct = 0;
+        for (const c of this._containers) {
+            if (c.curBottle === c.actualBottle) correct++;
+        }
+        if (this.Check_Tip_Label) this.Check_Tip_Label.string = `<color=#00ff00>${correct}</color>`;
+        if (this.Tip_Label_Node) this.Tip_Label_Node.active = true;
+        this.scheduleOnce(() => { if (this.Tip_Label_Node) this.Tip_Label_Node.active = false; }, TIP_HIDE_DELAY);
     }
 
     protected onDestroy(): void {
@@ -233,9 +272,6 @@ export class Guess_Bottle extends Component {
         };
         this.Mode_Title.string = names[gameState.mode] ?? '';
 
-        if (gameState.mode === GameMode.Classic && this.Step_Node) {
-            this.Step_Node.active = false;
-        }
         if (gameState.mode === GameMode.LevelClear && this.Level_Title) {
             this.Level_Title.string = `第 ${gameState.level - 4} 关`;
             this.Level_Title.node.active = true;
@@ -255,7 +291,14 @@ export class Guess_Bottle extends Component {
 
         if (correct === this._bottles.length) {
             if (this.Tip_Label_Node) this.Tip_Label_Node.active = false;
-            if (this.Next_Level_Panel) this.Next_Level_Panel.active = true;
+            this._setVisible(this.Setting_Page_Mask, true);
+            if (gameState.mode === GameMode.Classic) {
+                if (this.Complete_Panel) this.Complete_Panel.active = true;
+                if (this.Complete_Time_Label) this.Complete_Time_Label.string = formatTime(this._timerCtrl.currentSeconds);
+                if (this.Complete_Step_Label) this.Complete_Step_Label.string = `${this._checkCount}`;
+            } else {
+                if (this.Next_Level_Panel) this.Next_Level_Panel.active = true;
+            }
             this.unscheduleAllCallbacks();
         } else {
             if (this.Check_Tip_Label) this.Check_Tip_Label.string = `<color=#00ff00>${correct}</color>`;
@@ -355,6 +398,7 @@ export class Guess_Bottle extends Component {
         this._closePreview();
         this.closeSettingButton();
         this._setVisible(this.Next_Level_Panel, false);
+        this._setVisible(this.Complete_Panel, false);
         this._setVisible(this.Resurect_Tips, false);
         if (this.Steps_Label) this.Steps_Label.string = '0';
         this.startGame();
@@ -378,10 +422,28 @@ export class Guess_Bottle extends Component {
         if (this.HomeCanvas) this.HomeCanvas.active = true;
     }
 
+    // ==================== 通关面板按钮 ====================
+
+    /** 通关面板 - 返回入口 */
+    completeBack(): void {
+        this._setVisible(this.Complete_Panel, false);
+        this._setVisible(this.Setting_Page_Mask, false);
+        this.goHomeCanvas();
+    }
+
+    /** 通关面板 - 重新开始 */
+    completeRestart(): void {
+        this._setVisible(this.Complete_Panel, false);
+        this._setVisible(this.Setting_Page_Mask, false);
+        this.restart();
+    }
+
     // 编辑器按钮兼容别名
     regame = () => this.restart();
     backHomePage = () => this.backToHome();
     nextOne = () => this.nextLevel();
     returnBack = () => this.closeSettingButton();
     goHome = () => this.goHomeCanvas();
+    cpBack = () => this.completeBack();
+    cpRestart = () => this.completeRestart();
 }

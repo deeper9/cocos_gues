@@ -41,6 +41,9 @@ export class BottleTimerController {
 
     // ==================== 控制 ====================
 
+    /** 当前秒数（正计时=已用时间，倒计时=剩余时间） */
+    get currentSeconds(): number { return this._timer?.seconds ?? 0; }
+
     pause(): void { this._timer?.pause(); }
     resume(): void { this._timer?.resume(); }
     get isPaused(): boolean { return this._timer?.isPaused ?? true; }
